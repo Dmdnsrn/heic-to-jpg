@@ -29,7 +29,7 @@ li{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid 
 li:first-child{border-top:0}
 .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .size{color:var(--muted);white-space:nowrap}
-.st{min-width:110px;text-align:right;white-space:nowrap}
+.st{min-width:110px;max-width:45%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .st.ok{color:var(--ok)}.st.err{color:var(--err)}.st.wait,.st.run{color:var(--muted)}
 a.dl{color:var(--accent);text-decoration:none;font-weight:600}
 .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:16px;display:none}
@@ -60,10 +60,10 @@ footer{margin-top:18px;color:var(--muted);font-size:12.5px;text-align:center}
     <div class="bar" id="bar"><i id="barfill"></i></div>
     <ul id="list"></ul>
   </div>
-  <footer>heic2any болон JSZip сангуудыг ашигласан</footer>
+  <footer>heic-to болон JSZip сангуудыг ашигласан</footer>
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic-to@1.6.6/dist/iife/heic-to.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 (function () {
@@ -75,6 +75,7 @@ footer{margin-top:18px;color:var(--muted);font-size:12.5px;text-align:center}
   let busy = false;
 
   q.oninput = () => qv.textContent = q.value;
+  qv.textContent = q.value;
 
   const fmt = n => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
   const isHeic = f => /\.(heic|heif)$/i.test(f.name) || /image\/hei[cf]/i.test(f.type);
@@ -100,11 +101,28 @@ footer{margin-top:18px;color:var(--muted);font-size:12.5px;text-align:center}
     clearBtn.disabled = busy || items.length === 0;
   }
 
+  async function decode(file, quality) {
+    // 1) heic-to (шинэ libheif) 2) боломжгүй бол браузерийн өөрийн декодер
+    try {
+      return await HeicTo({ blob: file, type: "image/jpeg", quality });
+    } catch (e1) {
+      try {
+        const bmp = await createImageBitmap(file);
+        const c = document.createElement("canvas");
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext("2d").drawImage(bmp, 0, 0);
+        return await new Promise((res, rej) =>
+          c.toBlob(b => b ? res(b) : rej(new Error("canvas")), "image/jpeg", quality));
+      } catch (e2) {
+        throw e1;
+      }
+    }
+  }
+
   async function convertOne(it) {
     it.st.className = "st run"; it.st.textContent = "Хөрвүүлж байна...";
     try {
-      let out = await heic2any({ blob: it.file, toType: "image/jpeg", quality: q.value / 100 });
-      if (Array.isArray(out)) out = out[0];
+      const out = await decode(it.file, q.value / 100);
       it.blob = out;
       it.url = URL.createObjectURL(out);
       it.st.className = "st ok";
@@ -113,9 +131,11 @@ footer{margin-top:18px;color:var(--muted);font-size:12.5px;text-align:center}
       a.className = "dl"; a.href = it.url; a.download = it.name; a.textContent = "✓ Татах (" + fmt(out.size) + ")";
       it.st.appendChild(a);
     } catch (e) {
+      const msg = (e && (e.message || e.code)) || String(e);
       it.st.className = "st err";
-      it.st.textContent = "Алдаа";
-      it.st.title = (e && (e.message || e.code)) || "";
+      it.st.textContent = "Алдаа: " + msg;
+      it.st.title = msg;
+      console.error(it.file.name, e);
     }
   }
 
